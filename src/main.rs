@@ -1,6 +1,7 @@
 mod resp_parser;
 mod storage;
 use std::{
+    env::args,
     i64,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -63,7 +64,7 @@ fn handle_request(
                 _ => {
                     expiry_ms = expiry_ms_string.parse::<i64>().unwrap();
                 }
-            }
+            };
 
             storage_hash.insert(
                 request.arguments.get(0).unwrap().content.clone(),
@@ -126,9 +127,20 @@ fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<TimeKeyValueStorage<S
 
 fn main() {
     println!("[INFO] : Logs will appear here!");
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     let mut storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
-    //let mut storage_arc = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+
+    let arguments: Vec<String> = args().collect();
+    let mut address = String::from("127.0.0.1:");
+    let mut port = String::from("6379");
+    if arguments.len() >= 2 && arguments[1] == "--port" {
+        if let Ok(_port_number) = arguments[2].parse::<u16>() {
+            port = arguments[2].clone();
+        }
+    }
+    address += port.as_str();
+
+    let listener = TcpListener::bind(address).unwrap();
+
     for stream in listener.incoming() {
         let mut storage = Arc::clone(&mut storage_struct);
         match stream {
