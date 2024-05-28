@@ -232,6 +232,6 @@ pub fn to_bulk_string(content: String) -> String {
     format!("${}\r\n{}\r\n", content.len(), content)
 }
 
-pub fn to_simple_string(content: String) -> String {
-    format!("+{}\r\n", content)
+pub fn string_to_simple_resp(content: &str, prefix: char) -> String {
+    format!("{}{}\r\n", prefix, content)
 }
