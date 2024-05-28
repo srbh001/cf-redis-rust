@@ -14,6 +14,7 @@ use std::{
     thread,
 };
 
+use chrono::format;
 use resp_parser::{string_to_simple_resp, to_bulk_string};
 
 #[derive(Debug, Clone)]
@@ -170,7 +171,8 @@ fn handle_request(
                 // for stri in string_vec {
                 //     message += to_bulk_string(stri).as_str();
                 // }
-                message = to_bulk_string(format!("role:{:#?}", state_locked.role));
+                let content = format!("role:{}", state_locked.role);
+                message = to_bulk_string(content);
             } else {
                 message = String::from("$-1\r\n");
             }
@@ -223,7 +225,7 @@ fn main() {
     println!("[INFO] : Logs will appear here!");
 
     let storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
-    let replication_state = Arc::new(Mutex::new(RedisReplicationState::new()));
+    let mut replication_state = RedisReplicationState::new();
     let arguments: Vec<String> = args().collect();
 
     let mut address = String::from("127.0.0.1:");
@@ -235,18 +237,20 @@ fn main() {
         }
     }
     if let Some(replicaof_index) = arguments.iter().position(|arg| arg == "--replicaof") {
-        if replicaof_index + 3 <= arguments.len() {
-            let master_host = &arguments[replicaof_index + 1];
-            let master_port = &arguments[replicaof_index + 2];
-            replication_state.lock().unwrap().role = Role::Slave;
+        if replicaof_index + 2 <= arguments.len() {
+            let master_host_port = &arguments[replicaof_index + 1];
+            replication_state.role = Role::Slave;
+
+            println!("Master Host: {}", master_host_port);
         }
     }
     address += port.as_str();
 
+    let replication_state_arc = Arc::new(Mutex::new(replication_state));
     let listener = TcpListener::bind(address).unwrap();
     for stream in listener.incoming() {
         let storage = Arc::clone(&storage_struct);
-        let mut state = Arc::clone(&replication_state);
+        let mut state = Arc::clone(&replication_state_arc);
         match stream {
             Ok(stream) => {
                 // Spawn a new thread to handle the client
