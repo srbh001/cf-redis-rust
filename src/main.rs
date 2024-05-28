@@ -55,7 +55,7 @@ fn handle_request(
 
         if count >= 2 {
             let expiry_ms: i64;
-            let expiry_ms_string = request.arguments.get(3).unwrap().content.clone();
+            let expiry_ms_string = request.arguments.get(2).unwrap().content.clone();
             match expiry_ms_string.as_str() {
                 "MAX_VALUE" => {
                     expiry_ms = i64::MAX;

@@ -86,14 +86,15 @@ impl RespRequest {
                                 resp_struct.arguments.get(3).unwrap().content.parse::<i64>()
                             {
                                 expiry = int_expiry.to_string();
+                                resp_struct.arguments.remove(3);
                             }
                         }
+
+                        resp_struct.arguments.remove(2);
                     }
 
-                    resp_struct.arguments.remove(3);
-
                     resp_struct.arguments.insert(
-                        3,
+                        2,
                         Content {
                             content: expiry,
                             content_type: ContentType::BulkString,
