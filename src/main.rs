@@ -170,10 +170,10 @@ fn handle_request(
                 // for stri in string_vec {
                 //     message += to_bulk_string(stri).as_str();
                 // }
-                message = to_bulk_string("role:master".to_string());
+                message = to_bulk_string(format!("role:{:#?}", state_locked.role));
+            } else {
+                message = String::from("$-1\r\n");
             }
-        } else {
-            message = String::from("$-1\r\n");
         }
         stream.write_all(message.as_bytes()).unwrap();
     }
@@ -223,6 +223,7 @@ fn main() {
     println!("[INFO] : Logs will appear here!");
 
     let storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
+    let replication_state = Arc::new(Mutex::new(RedisReplicationState::new()));
     let arguments: Vec<String> = args().collect();
 
     let mut address = String::from("127.0.0.1:");
@@ -233,11 +234,16 @@ fn main() {
             port = arguments[2].clone();
         }
     }
-
+    if let Some(replicaof_index) = arguments.iter().position(|arg| arg == "--replicaof") {
+        if replicaof_index + 3 <= arguments.len() {
+            let master_host = &arguments[replicaof_index + 1];
+            let master_port = &arguments[replicaof_index + 2];
+            replication_state.lock().unwrap().role = Role::Slave;
+        }
+    }
     address += port.as_str();
 
     let listener = TcpListener::bind(address).unwrap();
-    let replication_state = Arc::new(Mutex::new(RedisReplicationState::new()));
     for stream in listener.incoming() {
         let storage = Arc::clone(&storage_struct);
         let mut state = Arc::clone(&replication_state);
