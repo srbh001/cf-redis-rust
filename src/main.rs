@@ -1,5 +1,8 @@
 mod resp_parser;
 mod storage;
+use crate::resp_parser::{Command, ContentType, RespRequest};
+use crate::storage::TimeKeyValueStorage;
+
 use std::{
     env::args,
     i64,
@@ -9,11 +12,26 @@ use std::{
     thread,
 };
 
-use anyhow::Context;
 use resp_parser::{string_to_simple_resp, to_bulk_string};
 
-use crate::resp_parser::{Command, ContentType, RespRequest};
-use crate::storage::TimeKeyValueStorage;
+#[derive(Debug, Clone)]
+enum Role {
+    Master,
+    Slave,
+}
+
+#[derive(Debug)]
+struct State {
+    role: Role,
+    connected_slaves: usize,
+    master_replid: str,
+    master_repl_offset: usize,
+    second_repl_offset: i32,
+    repl_backlog_active: usize,
+    repl_backlog_size: i32,
+    repl_backlog_first_byte_offset: usize,
+    repl_backlog_histlen: i32,
+}
 
 fn handle_request(
     request: RespRequest,
@@ -47,10 +65,12 @@ fn handle_request(
 
         stream.write_all(message.as_bytes()).unwrap();
     } else if matches!(request.command, Command::Set) {
-        let mut storage_hash = storage.lock().unwrap(); // Block thread only when the parsed
-                                                        // command requires storage access
-        let count = request.arguments.len(); //TODO: fix these conditions in the parser itself
-                                             // and sort the aruments - for GET as well
+        // Block thread only when the parsed command requires storage access
+        let mut storage_hash = storage.lock().unwrap();
+        let count = request.arguments.len();
+
+        //TODO: fix these conditions in the parser itself
+        // and sort the aruments - for GET as well
 
         let mut message = String::new();
 
@@ -127,16 +147,19 @@ fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<TimeKeyValueStorage<S
 
 fn main() {
     println!("[INFO] : Logs will appear here!");
-    let mut storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
 
+    let mut storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
     let arguments: Vec<String> = args().collect();
+
     let mut address = String::from("127.0.0.1:");
     let mut port = String::from("6379");
+
     if arguments.len() >= 2 && arguments[1] == "--port" {
         if let Ok(_port_number) = arguments[2].parse::<u16>() {
             port = arguments[2].clone();
         }
     }
+
     address += port.as_str();
 
     let listener = TcpListener::bind(address).unwrap();
