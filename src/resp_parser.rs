@@ -1,4 +1,4 @@
-use std::{str::Lines, usize};
+use std::{str::Lines, string, usize};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -76,8 +76,34 @@ impl RespRequest {
                     resp_struct.command = Command::Get;
                     resp_struct.arguments.remove(0);
                 } else if first_arg.content.to_ascii_uppercase() == "SET" {
+                    println!("[INFO] Arguments LEN {}", resp_struct.arguments.len());
                     resp_struct.command = Command::Set;
                     resp_struct.arguments.remove(0);
+                    let mut expiry = String::from("MAX_VALUE");
+                    if resp_struct
+                        .arguments
+                        .get(2)
+                        .unwrap()
+                        .content
+                        .to_ascii_lowercase()
+                        == "px"
+                    {
+                        if let Ok(int_expiry) =
+                            resp_struct.arguments.get(3).unwrap().content.parse::<i64>()
+                        {
+                            expiry = int_expiry.to_string();
+                        }
+                    }
+
+                    resp_struct.arguments.remove(3);
+
+                    resp_struct.arguments.insert(
+                        3,
+                        Content {
+                            content: expiry,
+                            content_type: ContentType::BulkString,
+                        },
+                    );
                 } else if first_arg.content.to_ascii_uppercase() == "PING" {
                     resp_struct.arguments.remove(0);
                     resp_struct.command = Command::Ping;

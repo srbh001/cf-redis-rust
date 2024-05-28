@@ -1,22 +1,23 @@
 mod resp_parser;
+mod storage;
 use std::{
-    collections::HashMap,
-    env::args,
-    fmt::Arguments,
+    i64,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
     thread,
 };
 
+use anyhow::Context;
 use resp_parser::{string_to_simple_resp, to_bulk_string};
 
-use crate::resp_parser::{handle_resp_request, Command, ContentType, RespRequest};
+use crate::resp_parser::{Command, ContentType, RespRequest};
+use crate::storage::TimeKeyValueStorage;
 
 fn handle_request(
     request: RespRequest,
     mut stream: TcpStream,
-    storage: Arc<Mutex<HashMap<String, String>>>,
+    storage: Arc<Mutex<TimeKeyValueStorage<String, String>>>,
 ) {
     let pong = "+PONG\r\n";
 
@@ -49,11 +50,25 @@ fn handle_request(
                                                         // command requires storage access
         let count = request.arguments.len(); //TODO: fix these conditions in the parser itself
                                              // and sort the aruments - for GET as well
+
         let mut message = String::new();
+
         if count >= 2 {
+            let expiry_ms: i64;
+            let expiry_ms_string = request.arguments.get(3).unwrap().content.clone();
+            match expiry_ms_string.as_str() {
+                "MAX_VALUE" => {
+                    expiry_ms = i64::MAX;
+                }
+                _ => {
+                    expiry_ms = expiry_ms_string.parse::<i64>().unwrap();
+                }
+            }
+
             storage_hash.insert(
                 request.arguments.get(0).unwrap().content.clone(),
                 request.arguments.get(1).unwrap().content.clone(),
+                expiry_ms,
             );
             message = string_to_simple_resp("OK", '+');
         } else {
@@ -65,6 +80,7 @@ fn handle_request(
         let mut message = String::new();
         let key = request.arguments.get(0).unwrap().content.clone();
         let value = storage_hash.get(&key);
+
         match value {
             Some(val) => {
                 message = to_bulk_string(val.to_string());
@@ -77,7 +93,7 @@ fn handle_request(
     }
 }
 
-fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<HashMap<String, String>>>) {
+fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<TimeKeyValueStorage<String, String>>>) {
     loop {
         let mut buffer = [0; 256];
         let bytes_read = match stream.read(&mut buffer) {
@@ -111,9 +127,10 @@ fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<HashMap<String, Strin
 fn main() {
     println!("[INFO] : Logs will appear here!");
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    let mut storage_arc = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+    let mut storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
+    //let mut storage_arc = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     for stream in listener.incoming() {
-        let mut storage = Arc::clone(&mut storage_arc);
+        let mut storage = Arc::clone(&mut storage_struct);
         match stream {
             Ok(stream) => {
                 // Spawn a new thread to handle the client
