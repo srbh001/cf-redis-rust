@@ -80,18 +80,13 @@ impl RespRequest {
                     resp_struct.command = Command::Set;
                     resp_struct.arguments.remove(0);
                     let mut expiry = String::from("MAX_VALUE");
-                    if resp_struct
-                        .arguments
-                        .get(2)
-                        .unwrap()
-                        .content
-                        .to_ascii_lowercase()
-                        == "px"
-                    {
-                        if let Ok(int_expiry) =
-                            resp_struct.arguments.get(3).unwrap().content.parse::<i64>()
-                        {
-                            expiry = int_expiry.to_string();
+                    if let Some(param) = resp_struct.arguments.get(2) {
+                        if param.content == "px" {
+                            if let Ok(int_expiry) =
+                                resp_struct.arguments.get(3).unwrap().content.parse::<i64>()
+                            {
+                                expiry = int_expiry.to_string();
+                            }
                         }
                     }
 
