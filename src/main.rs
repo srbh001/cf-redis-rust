@@ -171,7 +171,10 @@ fn handle_request(
                 // for stri in string_vec {
                 //     message += to_bulk_string(stri).as_str();
                 // }
-                let content = format!("role:{}", state_locked.role);
+                let mut content = format!("role:{}\n", state_locked.role);
+                content += format!("master_replid:{}\n", state_locked.master_replid).as_str();
+                content +=
+                    format!("master_repl_offset:{}\n", state_locked.master_repl_offset).as_str();
                 message = to_bulk_string(content);
             } else {
                 message = String::from("$-1\r\n");
