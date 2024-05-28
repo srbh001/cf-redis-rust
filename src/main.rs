@@ -3,9 +3,11 @@ mod storage;
 use crate::resp_parser::{Command, ContentType, RespRequest};
 use crate::storage::TimeKeyValueStorage;
 
+use std::vec;
 use std::{
+    cmp::Ordering,
     env::args,
-    i64,
+    fmt, i64,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
@@ -20,23 +22,69 @@ enum Role {
     Slave,
 }
 
-#[derive(Debug)]
-struct State {
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Role::Master => write!(f, "master"),
+            Role::Slave => write!(f, "slave"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RedisReplicationState {
     role: Role,
     connected_slaves: usize,
-    master_replid: str,
+    master_replid: String,
     master_repl_offset: usize,
     second_repl_offset: i32,
-    repl_backlog_active: usize,
+    repl_acklog_active: usize,
     repl_backlog_size: i32,
     repl_backlog_first_byte_offset: usize,
     repl_backlog_histlen: i32,
+}
+
+impl RedisReplicationState {
+    fn new() -> Self {
+        Self {
+            role: Role::Master,
+            connected_slaves: 0,
+            master_replid: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
+            master_repl_offset: 0,
+            second_repl_offset: 0,
+            repl_acklog_active: 0,
+            repl_backlog_size: 0,
+            repl_backlog_first_byte_offset: 0,
+            repl_backlog_histlen: 0,
+        }
+    }
+    fn to_string_vec(self) -> Vec<String> {
+        let mut string_vec = vec![];
+
+        string_vec.push("#Replication".to_string());
+        string_vec.push(format!("role:{:#?}", self.role));
+        string_vec.push(format!("connected_slaves:{}", self.connected_slaves));
+        string_vec.push(format!("master_replid:{}", self.master_replid));
+        string_vec.push(format!("second_repl_offset:{}", self.second_repl_offset));
+        string_vec.push(format!("repl_backlog_size:{}", self.repl_backlog_size));
+        string_vec.push(format!(
+            "repl_backlog_first_byte_offset:{}",
+            self.repl_backlog_first_byte_offset,
+        ));
+        string_vec.push(format!(
+            "repl_backlog_histlen:{}",
+            self.repl_backlog_histlen
+        ));
+
+        string_vec
+    }
 }
 
 fn handle_request(
     request: RespRequest,
     mut stream: TcpStream,
     storage: Arc<Mutex<TimeKeyValueStorage<String, String>>>,
+    state: Arc<Mutex<RedisReplicationState>>,
 ) {
     let pong = "+PONG\r\n";
 
@@ -50,17 +98,28 @@ fn handle_request(
         stream.write_all(pong.as_bytes()).unwrap();
     } else if matches!(request.command, Command::Echo) {
         let count = request.arguments.len();
-        let mut message = String::new();
-        if count > 1 {
-            message = format!("*{count}\r\n");
+        let mut message: String;
 
-            for x in request.arguments {
-                if matches!(x.content_type, ContentType::BulkString) {
-                    message += to_bulk_string(x.content).as_str();
+        match count.cmp(&1) {
+            Ordering::Greater => {
+                message = format!("*{}\r\n", count);
+
+                for arg in &request.arguments {
+                    if matches!(arg.content_type, ContentType::BulkString) {
+                        message += &to_bulk_string(arg.content.clone());
+                    }
                 }
             }
-        } else if count == 1 {
-            message = to_bulk_string(request.arguments.first().unwrap().content.clone());
+            Ordering::Equal => {
+                if let Some(first_arg) = request.arguments.first() {
+                    message = to_bulk_string(first_arg.content.clone());
+                } else {
+                    message = string_to_simple_resp("ERR no arguments found", '-');
+                }
+            }
+            Ordering::Less => {
+                message = string_to_simple_resp("ERR no arguments provided", '-');
+            }
         }
 
         stream.write_all(message.as_bytes()).unwrap();
@@ -69,21 +128,12 @@ fn handle_request(
         let mut storage_hash = storage.lock().unwrap();
         let count = request.arguments.len();
 
-        //TODO: fix these conditions in the parser itself
-        // and sort the aruments - for GET as well
-
-        let mut message = String::new();
-
-        if count >= 2 {
-            let expiry_ms: i64;
+        let message: String = if count >= 2 {
             let expiry_ms_string = request.arguments.get(2).unwrap().content.clone();
-            match expiry_ms_string.as_str() {
-                "MAX_VALUE" => {
-                    expiry_ms = i64::MAX;
-                }
-                _ => {
-                    expiry_ms = expiry_ms_string.parse::<i64>().unwrap();
-                }
+
+            let expiry_ms: i64 = match expiry_ms_string.as_str() {
+                "MAX_VALUE" => i64::MAX,
+                _ => expiry_ms_string.parse::<i64>().unwrap(),
             };
 
             storage_hash.insert(
@@ -91,30 +141,49 @@ fn handle_request(
                 request.arguments.get(1).unwrap().content.clone(),
                 expiry_ms,
             );
-            message = string_to_simple_resp("OK", '+');
+            string_to_simple_resp("OK", '+')
         } else {
-            message = string_to_simple_resp("ERR wrong number of arguments for 'get' command", '-');
-        }
+            string_to_simple_resp("ERR wrong number of arguments for 'get' command", '-')
+        };
         stream.write_all(message.as_bytes()).unwrap();
     } else if matches!(request.command, Command::Get) {
         let storage_hash = storage.lock().unwrap();
-        let mut message = String::new();
         let key = request.arguments.get(0).unwrap().content.clone();
         let value = storage_hash.get(&key);
 
-        match value {
-            Some(val) => {
-                message = to_bulk_string(val.to_string());
+        let message = match value {
+            Some(val) => to_bulk_string(val.to_string()),
+
+            None => string_to_simple_resp("-1", '$'),
+        };
+        stream.write_all(message.as_bytes()).unwrap();
+    } else if matches!(request.command, Command::Info) {
+        let mut state_locked = state.lock().unwrap();
+        state_locked.connected_slaves += 1;
+
+        let mut message = String::new();
+
+        if let Some(argument) = request.arguments.get(0) {
+            if argument.content == "replication" {
+                // let string_vec = state_locked.clone().to_string_vec();
+                // message = format!("*{}\r\n", string_vec.len());
+                // for stri in string_vec {
+                //     message += to_bulk_string(stri).as_str();
+                // }
+                message = to_bulk_string("role:master".to_string());
             }
-            None => {
-                message = string_to_simple_resp("-1", '$');
-            }
+        } else {
+            message = String::from("$-1\r\n");
         }
         stream.write_all(message.as_bytes()).unwrap();
     }
 }
 
-fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<TimeKeyValueStorage<String, String>>>) {
+fn handle_client(
+    mut stream: TcpStream,
+    storage: Arc<Mutex<TimeKeyValueStorage<String, String>>>,
+    state: Arc<Mutex<RedisReplicationState>>,
+) {
     loop {
         let mut buffer = [0; 256];
         let bytes_read = match stream.read(&mut buffer) {
@@ -141,14 +210,19 @@ fn handle_client(mut stream: TcpStream, storage: Arc<Mutex<TimeKeyValueStorage<S
 
         let resp_request: RespRequest = resp_parser::handle_resp_request(stream_buf);
 
-        handle_request(resp_request, stream.try_clone().unwrap(), storage.clone());
+        handle_request(
+            resp_request,
+            stream.try_clone().unwrap(),
+            storage.clone(),
+            state.clone(),
+        );
     }
 }
 
 fn main() {
     println!("[INFO] : Logs will appear here!");
 
-    let mut storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
+    let storage_struct = Arc::new(Mutex::new(TimeKeyValueStorage::<String, String>::new()));
     let arguments: Vec<String> = args().collect();
 
     let mut address = String::from("127.0.0.1:");
@@ -163,14 +237,15 @@ fn main() {
     address += port.as_str();
 
     let listener = TcpListener::bind(address).unwrap();
-
+    let replication_state = Arc::new(Mutex::new(RedisReplicationState::new()));
     for stream in listener.incoming() {
-        let mut storage = Arc::clone(&mut storage_struct);
+        let storage = Arc::clone(&storage_struct);
+        let mut state = Arc::clone(&replication_state);
         match stream {
             Ok(stream) => {
                 // Spawn a new thread to handle the client
                 thread::spawn(move || {
-                    handle_client(stream, storage);
+                    handle_client(stream, storage, state);
                 });
             }
             Err(e) => {

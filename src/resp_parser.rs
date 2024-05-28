@@ -1,4 +1,4 @@
-use std::{str::Lines, string, usize};
+use std::{str::Lines, usize};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -7,6 +7,7 @@ pub enum Command {
     Set,
     Ping,
     Echo,
+    Info,
     None,
 }
 #[allow(dead_code)]
@@ -103,6 +104,9 @@ impl RespRequest {
                 } else if first_arg.content.to_ascii_uppercase() == "PING" {
                     resp_struct.arguments.remove(0);
                     resp_struct.command = Command::Ping;
+                } else if first_arg.content.to_ascii_uppercase() == "INFO" {
+                    resp_struct.arguments.remove(0);
+                    resp_struct.command = Command::Info;
                 }
             }
         }
