@@ -9,6 +9,7 @@ pub enum Command {
     Echo,
     Info,
     Replconf,
+    Psync,
     None,
 }
 #[allow(dead_code)]
@@ -118,6 +119,11 @@ impl RespRequest {
                 } else if first_arg.content.to_ascii_uppercase() == "REPLCONF" {
                     resp_struct.arguments.remove(0);
                     resp_struct.command = Command::Replconf;
+                } else if first_arg.content.to_ascii_uppercase() == "PSYNC"
+                    && resp_struct.arguments.len() == 3
+                {
+                    resp_struct.arguments.remove(0);
+                    resp_struct.command = Command::Psync;
                 }
             }
         }

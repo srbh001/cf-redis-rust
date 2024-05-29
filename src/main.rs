@@ -1,9 +1,8 @@
 mod resp_parser;
 mod storage;
-use crate::resp_parser::{handle_resp_request, Command, ContentType, RespRequest};
+use crate::resp_parser::{Command, ContentType, RespRequest};
 use crate::storage::TimeKeyValueStorage;
 
-use std::net::SocketAddr;
 use std::vec;
 use std::{
     cmp::Ordering,
@@ -32,6 +31,7 @@ impl fmt::Display for Role {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct RedisReplicationState {
     role: Role,
@@ -183,6 +183,17 @@ fn handle_request(
         stream.write_all(message.as_bytes()).unwrap();
     } else if matches!(request.command, Command::Replconf) {
         stream.write_all("+OK\r\n".as_bytes()).unwrap();
+    } else if matches!(request.command, Command::Psync) {
+        let mut message = "-Err Invalid format".to_string();
+
+        if request.arguments.get(0).unwrap().content == "?" {
+            let state_locked = state.lock().unwrap();
+            message = format!(
+                "+FULLRESYNC {} {}\r\n",
+                state_locked.master_replid, state_locked.master_repl_offset
+            )
+        }
+        stream.write_all(message.as_bytes()).unwrap();
     }
 }
 
@@ -312,9 +323,23 @@ fn main() {
                             "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".as_bytes(),
                         )
                         .unwrap();
-                    if let Some(third_response) = read_parse_stream(stream).arguments.get(0) {
+                    if let Some(third_response) = read_parse_stream(stream.try_clone().unwrap())
+                        .arguments
+                        .get(0)
+                    {
                         if third_response.content == "OK" {
                             println!("[INFO] REPLCONF 2 Successful");
+                            stream
+                                .write_all(
+                                    "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".as_bytes(),
+                                )
+                                .expect("[ERROR] Handshake (3/3) Failed");
+                            if let Some(_) = read_parse_stream(stream.try_clone().unwrap())
+                                .arguments
+                                .get(0)
+                            {
+                                println!("[INFO] Handshake Successfull")
+                            }
                         }
                     }
                 }
@@ -327,7 +352,7 @@ fn main() {
     let listener = TcpListener::bind(address).unwrap();
     for stream in listener.incoming() {
         let storage = Arc::clone(&storage_struct);
-        let mut state = Arc::clone(&replication_state_arc);
+        let state = Arc::clone(&replication_state_arc);
         match stream {
             Ok(stream) => {
                 // Spawn a new thread to handle the client
