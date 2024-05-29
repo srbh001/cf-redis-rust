@@ -269,7 +269,7 @@ fn main() {
             let mut stream = TcpStream::connect(master_host_port.clone())
                 .expect("[ERROR] Could not connect to master");
 
-            let ping = string_to_simple_resp("PING", '+');
+            let ping = format!("*1/r/n{}", to_bulk_string("PING".to_string()));
 
             stream
                 .write_all(ping.as_bytes())
