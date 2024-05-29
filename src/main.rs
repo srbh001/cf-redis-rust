@@ -13,8 +13,13 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
-
+use base64::prelude::*;
 use resp_parser::{string_to_simple_resp, to_bulk_string};
+
+
+const EMPTY_RDB_BASE64 :&str= 
+"UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==";
+
 
 #[derive(Debug, Clone)]
 enum Role {
@@ -193,7 +198,11 @@ fn handle_request(
                 state_locked.master_replid, state_locked.master_repl_offset
             )
         }
-        stream.write_all(message.as_bytes()).unwrap();
+        let _ = stream.write(message.as_bytes()).unwrap();
+        let content= BASE64_STANDARD.decode(EMPTY_RDB_BASE64).unwrap();
+        let _ = stream.write(format!("${}\r\n", content.len()).as_bytes()).unwrap();
+        stream.write_all(&content).unwrap();
+
     }
 }
 
@@ -338,8 +347,8 @@ fn main() {
                                 .arguments
                                 .get(0)
                             {
-                                println!("[INFO] Handshake Successfull")
-                            }
+                            let rdb_data = read_parse_stream(stream.try_clone().unwrap());                           }
+                            println!("[INFO] Handshake Successfull");
                         }
                     }
                 }
