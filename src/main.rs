@@ -1,8 +1,9 @@
 mod resp_parser;
 mod storage;
-use crate::resp_parser::{Command, ContentType, RespRequest};
+use crate::resp_parser::{handle_resp_request, Command, ContentType, RespRequest};
 use crate::storage::TimeKeyValueStorage;
 
+use std::net::SocketAddr;
 use std::vec;
 use std::{
     cmp::Ordering,
@@ -14,7 +15,6 @@ use std::{
     thread,
 };
 
-use chrono::format;
 use resp_parser::{string_to_simple_resp, to_bulk_string};
 
 #[derive(Debug, Clone)]
@@ -181,6 +181,8 @@ fn handle_request(
             }
         }
         stream.write_all(message.as_bytes()).unwrap();
+    } else if matches!(request.command, Command::Replconf) {
+        stream.write_all("+OK\r\n".as_bytes()).unwrap();
     }
 }
 
@@ -261,21 +263,62 @@ fn main() {
     }
     if let Some(replicaof_index) = arguments.iter().position(|arg| arg == "--replicaof") {
         if replicaof_index + 2 <= arguments.len() {
-            let master_host_port = arguments[replicaof_index + 1].replace(" ", ":");
+            let mut host_port = arguments[replicaof_index + 1]
+                .split_whitespace()
+                .into_iter();
+            let host = host_port.next().expect("[Error] Could not read host");
+            let port = host_port.next().expect("[Error] Could not read port");
 
-            println!("Master Host: {}", master_host_port.clone());
+            println!("Master Host: {} {}", host, port);
             replication_state.role = Role::Slave;
 
-            let mut stream = TcpStream::connect(master_host_port.clone())
+            let mut stream = TcpStream::connect(format!("{}:{}", host, port))
                 .expect("[ERROR] Could not connect to master");
 
+            // --------- HANDSHAKE BEGINS---------------------
             let ping = format!("*1\r\n{}", to_bulk_string("PING".to_string()));
 
             stream
                 .write_all(ping.as_bytes())
                 .expect("[ERROR] Could not ping master");
-            let parsed_response_ping = read_parse_stream(stream.try_clone().unwrap());
+            let parsed_response_ping = read_parse_stream(
+                stream
+                    .try_clone()
+                    .expect("[ERROR] Could not read the master"),
+            );
             println!("{:#?}", parsed_response_ping.arguments);
+            if parsed_response_ping
+                .arguments
+                .get(0)
+                .unwrap()
+                .content
+                .to_uppercase()
+                == "PONG"
+            {
+                println!("[INFO] Ping Successful");
+                let message = format!(
+                    "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n",
+                    port
+                );
+                stream
+                    .write_all(message.as_bytes())
+                    .expect("Could not write REPLCONF to master");
+                let second_response = read_parse_stream(stream.try_clone().unwrap());
+                if second_response.arguments.get(0).unwrap().content == "OK" {
+                    println!("[INFO] REPLCONF 1 Successful");
+
+                    stream
+                        .write_all(
+                            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".as_bytes(),
+                        )
+                        .unwrap();
+                    if let Some(third_response) = read_parse_stream(stream).arguments.get(0) {
+                        if third_response.content == "OK" {
+                            println!("[INFO] REPLCONF 2 Successful");
+                        }
+                    }
+                }
+            }
         }
     }
     address += port.as_str();
