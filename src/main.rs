@@ -224,6 +224,26 @@ fn handle_client(
     }
 }
 
+fn read_parse_stream(mut stream: TcpStream) -> RespRequest {
+    let mut buffer = [0; 256];
+    let bytes_read = match stream.read(&mut buffer) {
+        Ok(0) => {
+            // Connection closed by client
+            println!("[INFO] : Connection closed by client");
+            return RespRequest::new();
+        }
+        Ok(n) => n,
+        Err(e) => {
+            println!("[ERROR] : {}", e);
+            return RespRequest::new();
+        }
+    };
+    let shortened_buffer = &buffer[..bytes_read];
+    let stream_buf = String::from_utf8_lossy(shortened_buffer).into_owned();
+    let resp_response: RespRequest = resp_parser::handle_resp_request(stream_buf);
+    resp_response
+}
+
 fn main() {
     println!("[INFO] : Logs will appear here!");
 
@@ -241,10 +261,21 @@ fn main() {
     }
     if let Some(replicaof_index) = arguments.iter().position(|arg| arg == "--replicaof") {
         if replicaof_index + 2 <= arguments.len() {
-            let master_host_port = &arguments[replicaof_index + 1];
+            let master_host_port = arguments[replicaof_index + 1].replace(" ", ":");
+
+            println!("Master Host: {}", master_host_port.clone());
             replication_state.role = Role::Slave;
 
-            println!("Master Host: {}", master_host_port);
+            let mut stream = TcpStream::connect(master_host_port.clone())
+                .expect("[ERROR] Could not connect to master");
+
+            let ping = string_to_simple_resp("PING", '+');
+
+            stream
+                .write_all(ping.as_bytes())
+                .expect("[ERROR] Could not ping master");
+            let parsed_response_ping = read_parse_stream(stream.try_clone().unwrap());
+            println!("{:#?}", parsed_response_ping.arguments);
         }
     }
     address += port.as_str();

@@ -8,6 +8,7 @@ pub enum Command {
     Ping,
     Echo,
     Info,
+    Replconf,
     None,
 }
 #[allow(dead_code)]
@@ -53,6 +54,13 @@ pub const ACCEPTED_TYPES: [&str; 14] = [
 ];
 
 impl RespRequest {
+    pub fn new() -> Self {
+        Self {
+            command: Command::None,
+            single_content_type: ContentType::None,
+            arguments: vec![],
+        }
+    }
     pub fn print_struct(resp_struct: RespRequest) {
         let mut args = String::from("");
         for x in resp_struct.arguments {
@@ -107,6 +115,9 @@ impl RespRequest {
                 } else if first_arg.content.to_ascii_uppercase() == "INFO" {
                     resp_struct.arguments.remove(0);
                     resp_struct.command = Command::Info;
+                } else if first_arg.content.to_ascii_uppercase() == "REPLCONF" {
+                    resp_struct.arguments.remove(0);
+                    resp_struct.command = Command::Replconf;
                 }
             }
         }
