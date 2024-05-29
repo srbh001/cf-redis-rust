@@ -298,7 +298,7 @@ fn main() {
                 println!("[INFO] Ping Successful");
                 let message = format!(
                     "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{}\r\n",
-                    port
+                    6380
                 );
                 stream
                     .write_all(message.as_bytes())
